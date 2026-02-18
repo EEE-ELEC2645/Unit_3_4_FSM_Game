@@ -1,87 +1,43 @@
-# ELEC2645 - Character FSM Game Demo
+# ELEC2645 - Character FSM with Dash Ability Demo
 
-Learn about **Finite State Machines (FSM)** through a practical game character implementation. This demo shows how FSMs are used in game development to manage character behavior, physics, and animations - a fundamental technique used in every major game engine.
+Learn about **Finite State Machines (FSM)** through a practical game character implementation. This demo shows how FSMs are used in game development to manage character behavior and state transitions triggered by button input.
 
 **Key Files:**
 - [Character/Character.h](Character/Character.h) - FSM state definitions and constants
-- [Character/Character.c](Character/Character.c) - FSM implementation and physics
-- [Core/Src/main.c](Core/Src/main.c) - Main game loop with update/render separation
-- [CHARACTER_FSM_GUIDE.md](CHARACTER_FSM_GUIDE.md) - Comprehensive guide
+- [Character/Character.c](Character/Character.c) - FSM implementation
+- [Core/Src/main.c](Core/Src/main.c) - Main game loop and interrupt handling
 - [CHARACTER_QUICK_REFERENCE.md](CHARACTER_QUICK_REFERENCE.md) - Quick reference
-
----
-
-## What is a Finite State Machine?
-
-A **Finite State Machine** is a programming pattern where:
-
-1. **The system has a set number of "states"** (modes of operation)
-2. **The system is in exactly ONE state at any time**
-3. **Inputs are handled differently depending on which state the system is in**
-4. **External events can cause transitions between states**
-
-### Real-World Examples
-
-- **Traffic Lights**: States are RED, YELLOW, GREEN - timers cause transitions
-- **Mobile Phone**: States are LOCKED, HOME_SCREEN, IN_CALL, CAMERA - button presses cause transitions
-- **Washing Machine**: States are IDLE, WASH, RINSE, SPIN - sensor readings cause transitions
-- **Game Character**: States are IDLE, WALKING, JUMPING, ATTACKING - player input causes transitions
-
-### The Key Insight
-
-**The SAME input produces DIFFERENT behavior depending on the current state!**
-
-Example: Pressing "A" on a game controller:
-- In MENU state → selects menu item
-- In GAMEPLAY state → character jumps
-- In PAUSE state → resumes game
 
 ---
 
 ## This Demo Project
 
-This demo implements a **Mario-like platform game character** with physics and animations controlled by a Finite State Machine.
+This demo implements a **simple game character with dash ability** controlled by a Finite State Machine.
 
 ### The Character States
 
-| State | Behavior | Sprite | Transition To |
-|-------|----------|--------|---------------|
-| **IDLE** | Standing still on ground | Static sprite | RUNNING (joystick move)<br>JUMPING (button press) |
-| **RUNNING** | Moving left/right | Animated run cycle | IDLE (joystick center)<br>JUMPING (button press) |
-| **JUMPING** | In mid-air with physics | Jump sprite | IDLE/RUNNING (on landing) |
+| State | Behavior | Sprite | Movement Speed | Transition To |
+|-------|----------|--------|-----------------|---------------|
+| **IDLE** | Standing still | Static sprite | 0 | WALKING (joystick move)<br>DASHING (button press) |
+| **WALKING** | Moving in direction | Animated walk cycle | 2 px/frame | IDLE (joystick center)<br>DASHING (button press) |
+| **DASHING** | Fast movement | Speed lines sprite | 6 px/frame | IDLE (dash ends, no input)<br>WALKING (dash ends, input held) |
 
-### Physics System
+### Dash System
 
-The character uses real-time physics simulation:
-- **Gravity**: 1.1 pixels/frame² (constant downward acceleration)
-- **Jump velocity**: -10.0 pixels/frame (initial upward velocity)
-- **Run speed**: 4 pixels/frame (horizontal movement)
-- **Terminal velocity**: 15.0 pixels/frame (maximum fall speed)
-- **Ground collision**: Character lands at Y=200 (ground level)
+**Button-triggered temporary speed boost:**
+- Press button (BTN3) to start dashing
+- Dash duration: 20 frames (~600ms at 30 FPS)
+- Dash speed: 6 pixels/frame (3x normal speed)
+- Can dash from IDLE or WALKING state
+- Automatically returns to previous state when dash ends
 
 ### State Transitions
 
 **Inputs determine transitions:**
-- **Joystick Left/Right** → Enter RUNNING state (if on ground)
-- **Joystick Centered** → Return to IDLE (if on ground)
-- **BTN2 Press** → Jump to JUMPING state (if on ground)
-- **Landing Detection** → Return to IDLE or RUNNING (based on joystick)
-
-## Hardware Setup
-
-### Input Controls
-
-| Input | Pin | Purpose |
-|-------|-----|---------|
-| Joystick X-axis | ADC1_IN5 | Horizontal movement (left/right) |
-| Joystick Y-axis | ADC1_IN6 | (Reserved for future use) |
-| BTN2 | PC2 | Jump button (interrupt-driven) |
-
-### Display
-
-- **LCD**: ST7789V2 240x240 RGB565 display
-- **Refresh**: ~33 FPS (30ms frame time)
-- **Debug overlay**: Real-time state/position/velocity display
+- **Joystick Move** → Enter WALKING state
+- **Joystick Centered** → Return to IDLE
+- **Button Press** → Enter DASHING state from IDLE or WALKING
+- **Dash Duration Expires** → Return to IDLE (if no input) or WALKING (if input held)
 
 ## Code Architecture
 
@@ -89,17 +45,20 @@ The character uses real-time physics simulation:
 
 ```c
 while (1) {
-    // 1. Read inputs
-    Joystick_Read(&joy_x, &joy_y);
+    // 1. Read inputs (joystick from ADC)
+    Joystick_Read(&joystick_cfg, &joystick_data);
     
-    // 2. Update game logic (physics, FSM, collisions)
-    update_character(&game_character, joy_x, joy_y);
+    // 2. Update game logic (FSM state machine)
+    //    dash_button_pressed is set by interrupt handler
+    update_character(&joystick_data);
+        // → Character_Update(&game_character, joy, dash_button_pressed)
     
     // 3. Render everything (clear, draw, refresh)
-    render_game(&game_character);
+    render_game();
+        // → Draw character, debug info
     
     // 4. Frame timing
-    HAL_Delay(30);
+    HAL_Delay(30);  // ~33 FPS
 }
 ```
 
@@ -114,20 +73,26 @@ while (1) {
 ```c
 // Character.h - Interface
 typedef enum {
-    CHAR_IDLE,
-    CHAR_RUNNING,
-    CHAR_JUMPING
+    CHAR_IDLE,        // Standing still
+    CHAR_WALKING,     // Moving normally
+    CHAR_DASHING      // Fast movement (temporary)
 } CharacterState_t;
 
+// Movement constants
+#define CHAR_SPEED 2                // Normal speed (pixels/frame)
+#define CHAR_DASH_SPEED 6           // Dash speed (pixels/frame)
+#define CHAR_DASH_DURATION 20       // Dash duration (frames)
+
 typedef struct {
-    int x, y;                     // Position
-    float velocity_y;             // Vertical physics
+    int16_t x, y;                 // Position
     CharacterState_t state;       // Current FSM state
-    int animation_frame;          // Animation counter
+    uint8_t animation_frame;      // Animation counter
+    int8_t move_x, move_y;        // Movement direction (-1, 0, or 1)
+    uint8_t dash_counter;         // Frames remaining in dash
 } Character_t;
 
 void Character_Init(Character_t* character);
-void Character_Update(Character_t* character, int joy_x, int joy_y);
+void Character_Update(Character_t* character, Joystick_t* joy, uint8_t dash_pressed);
 void Character_Draw(Character_t* character);
 ```
 
@@ -140,64 +105,139 @@ The character's current state is stored in the `Character_t` structure:
 ```c
 Character_t game_character = {
     .x = 120,
-    .y = GROUND_Y,
-    .velocity_y = 0.0f,
+    .y = 120,
     .state = CHAR_IDLE,
-    .animation_frame = 0
+    .animation_frame = 0,
+    .move_x = 0,
+    .move_y = 0,
+    .dash_counter = 0
 };
 ```
 
-### 2. State Machine Logic (Character_Update)
+### 2. Interrupt-Driven Input
 
-Every frame, the FSM processes inputs and physics:
+Button presses trigger interrupts rather than polling:
 
 ```c
-void Character_Update(Character_t* character, int joy_x, int joy_y) {
-    // 1. Handle movement input
-    if (joy_x < -JOYSTICK_DEADZONE) {
-        character->x -= CHAR_SPEED;  // Move left
-    }
-    else if (joy_x > JOYSTICK_DEADZONE) {
-        character->x += CHAR_SPEED;  // Move right
-    }
-    
-    // 2. Handle jump initiation
-    if (g_jump_button_pressed && character->y >= GROUND_Y) {
-        character->velocity_y = CHAR_JUMP_VELOCITY;
-        character->y = GROUND_Y - 1;  // Ensure airborne detection
-        g_jump_button_pressed = 0;
-    }
-    
-    // 3. Apply physics (gravity + collision)
-    if (character->y < GROUND_Y) {
-        character->velocity_y += CHAR_GRAVITY;
-        if (character->velocity_y > CHAR_MAX_FALL_VELOCITY) {
-            character->velocity_y = CHAR_MAX_FALL_VELOCITY;
+// Global flag set by interrupt handler
+volatile uint8_t dash_button_pressed = 0;
+volatile uint32_t dash_button_last_interrupt_time = 0;
+#define DEBOUNCE_DELAY 200  // milliseconds
+
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
+    if (GPIO_Pin == BTN3_Pin) {
+        uint32_t current_time = HAL_GetTick();
+        // Debounce: ignore if less than 200ms since last press
+        if ((current_time - dash_button_last_interrupt_time) > DEBOUNCE_DELAY) {
+            dash_button_last_interrupt_time = current_time;
+            dash_button_pressed = 1;  // Flag tells FSM to start dash
         }
-        character->y += (int)character->velocity_y;
-        
-        if (character->y >= GROUND_Y) {
-            character->y = GROUND_Y;
-            character->velocity_y = 0.0f;
-        }
-    }
-    
-    // 4. Update FSM state based on physics + input
-    if (character->y < GROUND_Y) {
-        character->state = CHAR_JUMPING;
-    }
-    else if (joy_x < -JOYSTICK_DEADZONE || joy_x > JOYSTICK_DEADZONE) {
-        character->state = CHAR_RUNNING;
-        character->animation_frame++;
-    }
-    else {
-        character->state = CHAR_IDLE;
-        character->animation_frame = 0;
     }
 }
 ```
 
-### 3. State-Dependent Rendering (Character_Draw)
+Remember to keep the ISR short and simple!
+
+### 3. State Machine Logic (Character_Update)
+
+Every frame, the FSM processes input and manages state transitions:
+
+```c
+void Character_Update(Character_t* character, Joystick_t* joy, 
+                     uint8_t dash_pressed) {
+    // 1. Read joystick input (using discrete 8-way directions)
+    int8_t input_x = 0, input_y = 0;
+    
+    switch (joy->direction) {
+        case CENTRE: input_x = 0; input_y = 0; break;
+        case N:  input_x = 0; input_y = -1; break;  // North (up)
+... // Other directions (NE, E, SE, S, SW, W, NW) set input_x and input_y accordingly
+    }
+    
+    character->move_x = input_x;
+    character->move_y = input_y;
+    
+    // 2. Handle dash trigger from button press
+    if (dash_pressed && character->dash_counter == 0) {
+        character->dash_counter = CHAR_DASH_DURATION;  // Start 20-frame dash
+    }
+    
+    // 3. Choose movement speed based on dash state
+    uint8_t current_speed = CHAR_SPEED;
+    if (character->dash_counter > 0) {
+        current_speed = CHAR_DASH_SPEED;  // Move 3x faster during dash
+        character->dash_counter--;        // Count down dash duration
+    }
+    
+    // 4. Update position
+    int16_t new_x = character->x + (input_x * current_speed);
+    int16_t new_y = character->y + (input_y * current_speed);
+    
+    // Keep on screen
+    if (new_x < SCREEN_MIN_X) new_x = SCREEN_MIN_X;
+    if (new_x > SCREEN_MAX_X) new_x = SCREEN_MAX_X;
+    if (new_y < SCREEN_MIN_Y) new_y = SCREEN_MIN_Y;
+    if (new_y > SCREEN_MAX_Y) new_y = SCREEN_MAX_Y;
+    
+    if (input_x != 0 || input_y != 0) {
+        character->x = new_x;
+        character->y = new_y;
+    }
+    
+    // 5. Update FSM state based on input and dash status
+    character->prev_state = character->state;
+    uint8_t is_moving = (input_x != 0 || input_y != 0);
+    
+    switch (character->state) {
+        case CHAR_IDLE:
+            if (is_moving) {
+                character->state = CHAR_WALKING;
+            } else if (character->dash_counter > 0) {
+                character->state = CHAR_DASHING;
+            }
+            break;
+        
+        case CHAR_WALKING:
+            if (!is_moving && character->dash_counter == 0) {
+                character->state = CHAR_IDLE;
+            } else if (character->dash_counter > 0) {
+                character->state = CHAR_DASHING;
+            }
+            break;
+        
+        case CHAR_DASHING:
+            if (character->dash_counter == 0) {
+                // Dash ended - return to previous state
+                if (is_moving) {
+                    character->state = CHAR_WALKING;
+                } else {
+                    character->state = CHAR_IDLE;
+                }
+            }
+            break;
+    }
+    
+    // 6. Update animation frame
+    character->frame_counter++;
+    if (character->frame_counter >= 10) {
+        character->frame_counter = 0;
+        if (character->state == CHAR_WALKING) {
+            character->animation_frame = (character->animation_frame + 1) % 2;
+        } else {
+            character->animation_frame = 0;
+        }
+    }
+}
+```
+
+**State transition flow:**
+1. Button pressed → `dash_button_pressed` set to 1 by interrupt
+2. Main loop reads flag, clears it
+3. `Character_Update()` starts dash countdown
+4. While `dash_counter > 0`, move at fast speed and stay in DASHING state
+5. When `dash_counter` reaches 0, transition back to IDLE or WALKING
+
+### 4. State-Dependent Rendering (Character_Draw)
 
 The sprite changes based on the current state:
 
@@ -210,49 +250,22 @@ void Character_Draw(Character_t* character) {
             sprite = CharacterIDLE;
             break;
         
-        case CHAR_RUNNING:
-            // Animated sprite (alternates every 5 frames)
-            sprite = ((character->animation_frame / 5) % 2) ? 
-                     CharacterRUN1 : CharacterRUN2;
+        case CHAR_WALKING:
+            // Animated sprite (alternates between 2 frames)
+            sprite = (character->animation_frame == 0) ? 
+                     CharacterWALK1 : CharacterWALK2;
             break;
         
-        case CHAR_JUMPING:
-            sprite = CharacterJUMP;
+        case CHAR_DASHING:
+            sprite = CharacterDASHING;  // Speed lines
             break;
     }
     
-    Character_DrawScaledSprite(character->x, character->y, sprite, 4);
+    LCD_Draw_Sprite_Colour_Scaled(character->x, character->y, sprite, 5, 4);
 }
 ```
 
 **This is the FSM pattern in action**: The SAME drawing function produces DIFFERENT output based on the current state!
-
-### 4. Interrupt-Driven Jump Input
-
-The jump button uses **hardware interrupts** for instant response:
-
-```c
-volatile uint8_t g_jump_button_pressed = 0;
-volatile uint32_t g_last_jump_time = 0;
-
-void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
-    if (GPIO_Pin == BTN2_Pin) {
-        uint32_t current_time = HAL_GetTick();
-        
-        // Debouncing: Ignore presses within 100ms
-        if (current_time - g_last_jump_time > 100) {
-            g_jump_button_pressed = 1;  // Set flag for main loop
-            g_last_jump_time = current_time;
-        }
-    }
-}
-```
-
-**Why interrupts for buttons?**
-- **Instant response**: No polling delay
-- **CPU efficient**: Sleep when idle, wake on event
-- **Debouncing**: Built-in timing prevents button bounce
-- **Industry standard**: All game controllers use interrupt-driven input
 
 ---
 
@@ -260,41 +273,36 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 
 ### 1. Finite State Machine Pattern
 
-The FSM manages character behavior based on physics and input:
-- **State storage**: enum `CharacterState_t` with 3 values
+The FSM manages character behavior based on input and button presses:
+- **State storage**: enum `CharacterState_t` with 3 values (IDLE, WALKING, DASHING)
 - **State logic**: Switch statement in `Character_Update()`
 - **State-dependent output**: Different sprites per state in `Character_Draw()`
-- **Transition rules**: Physics (grounded vs airborne) + input determines state
+- **Transition rules**: Input + button press + dash timer determines state
 
-### 2. Physics Simulation
+### 2. Interrupt-Driven Input Handling
 
-Real-time Newtonian physics updates every frame:
-```c
-velocity_y += CHAR_GRAVITY;           // Acceleration (F = ma)
-y += (int)velocity_y;                 // Position integration
-if (y >= GROUND_Y) { velocity_y = 0; } // Collision response
-```
+See implementation above in "How the Character FSM Works".
+
+**Why interrupt-driven?**
+- Responsive (no polling delay)
+- Low CPU overhead (only triggered on button press)
+- Industry standard for game input
+- Allows main loop to focus on game logic
 
 ### 3. Update/Render Separation
 
 Industry-standard game loop pattern:
-- **Update**: Pure logic (no drawing) - physics, FSM, input
-- **Render**: Pure drawing (no logic) - sprites, debug overlay
+- **Update**: Pure logic (no drawing) - FSM, input processing, state transitions
+- **Render**: Pure drawing (no logic) - sprites, debug overlay, screen refresh
 - **Benefits**: Testable, modular, clear separation of concerns
 
 ### 4. Object-Oriented C
 
 Character module demonstrates encapsulation in C:
-- **Character_t struct**: Data encapsulation (position, velocity, state)
+- **Character_t struct**: Data encapsulation (position, state, movement)
 - **Character_* functions**: Method-like interface (Init, Update, Draw)
-- **Information hiding**: Private sprite arrays in .c file
-
-### 5. Interrupt Service Routines (ISRs)
-
-Jump button uses hardware interrupt for responsiveness:
-- **HAL_GPIO_EXTI_Callback**: Automatically called on button press
-- **Debouncing**: 100ms timing prevents multiple triggers
-- **Flag pattern**: ISR sets flag, main loop clears it (safe communication)
+- **Information hiding**: Sprite arrays in .c file, not exposed in header
+- **Modularity**: Character logic independent from main game loop
 
 ---
 
@@ -302,26 +310,26 @@ Jump button uses hardware interrupt for responsiveness:
 
 ### Easy Modifications
 
-1. **Adjust jump height**: Change `CHAR_JUMP_VELOCITY` in Character.h
-2. **Change run speed**: Modify `CHAR_SPEED` constant
-3. **Tweak gravity**: Adjust `CHAR_GRAVITY` for different feel
-4. **Add wall collision**: Check `character->x` bounds in Update
-5. **More animation frames**: Add sprites and increase animation counter
+1. **Adjust speeds**: Change `CHAR_SPEED` and `CHAR_DASH_SPEED` in Character.h
+2. **Longer dash**: Increase `CHAR_DASH_DURATION` (in frames)
+3. **Screen boundaries**: Adjust `SCREEN_MIN/MAX_X/Y` constants in Character.h
+4. **Animation speed**: Change frame counter threshold in `Character_Update()`
+5. **New sprite graphics**: Replace `CharacterIDLE`, `CharacterWALK1`, `CharacterWALK2`, `CharacterDASHING` arrays
 
 ### Intermediate Additions
 
-1. **Add FALLING state**: Separate falling from jumping
-2. **Double jump**: Track `jumps_remaining` counter
-3. **Moving platforms**: Add platform array and collision detection
-4. **Sprint mechanic**: Hold button for `CHAR_RUNNING_FAST` state
-5. **Sound effects**: Use Buzzer module on state transitions
+1. **Add multiple dash abilities**: Track dash count, allow 2 dashes before recharge
+2. **Directional visual feedback**: Change sprite rotation based on movement direction
+3. **Dash particle effects**: Draw visual effects during dash state
+4. **Sound on dash**: Play buzzer sound when dash starts
+5. **Screen-wrap effect**: Let character move off edge and reappear on opposite side
 
 ### Advanced Features
 
-1. **Multiple characters**: Array of `Character_t` with AI FSMs
-2. **Particle effects**: Dust clouds on landing, jump trails
-3. **Camera follow**: Scroll background, keep character centered
-4. **State history**: Implement coyote time (late jump forgiveness)
+1. **Enemy AI**: Create second character with FSM that hunts the player
+2. **Collectibles**: Add state for picking up items
+3. **Combo system**: Reward consecutive dashes without stopping
+4. **Tutorial overlay**: Display state transitions on screen
 5. **Game state FSM**: Add MENU, PLAYING, PAUSED, GAME_OVER states
 
 ---
@@ -331,10 +339,10 @@ Jump button uses hardware interrupt for responsiveness:
 This demo teaches fundamental game development concepts:
 
 1. **FSM Design Pattern** - Core technique used in every game engine
-2. **Physics Simulation** - Gravity, velocity, collision detection
+2. **Interrupt-Driven Input** - Responsive player control architecture
 3. **Update/Render Loop** - Industry-standard game architecture
-4. **State-Dependent Behavior** - Same input produces different output
-5. **Interrupt-Driven Input** - Responsive real-time control
+4. **State-Dependent Behavior** - Same input produces different output based on state
+5. **Time-Based State Transitions** - DASHING state automatically expires
 6. **Object-Oriented C** - Encapsulation and modularity without C++
 7. **Real-Time Systems** - Frame timing, fixed timestep iteration
 
@@ -343,73 +351,8 @@ This demo teaches fundamental game development concepts:
 - **Unity/Unreal Engine**: Use same update/render separation
 - **Character controllers**: Commercial games use FSM for player movement
 - **State machines**: Every NPC enemy behavior is an FSM
-- **Physics engines**: Box2D, PhysX use same integration techniques
-- **Input systems**: All consoles use interrupt-driven controller input
-
----
-
-## Extending the Demo
-
-Try these modifications to deepen your understanding:
-
-### Add a New State
-
-1. Add a new state to the enum (e.g., `STATE_POLYGONS`)
-2. Increment `STATE_COUNT`
-3. Add a new state handler function
-4. Add the new case to the switch statement
-5. Add state name to the `state_names` array
-
-### Add State-Specific LED Patterns
-
-Make each state light the onboard LED differently:
-
-```c
-void set_led_for_state(FSM_State_t state) {
-    switch(state) {
-        case STATE_CIRCLES: PWM_SetDuty(&pwm_cfg, 25); break;
-        case STATE_RECTANGLES: PWM_SetDuty(&pwm_cfg, 50); break;
-        // etc.
-    }
-}
-```
-
-### Implement Conditional Transitions
-
-Add logic so states only change under certain conditions:
-## Software Debouncing
-
-Mechanical buttons generate electrical noise when pressed. This demo uses **software debouncing** to filter spurious interrupts:
-
-### The Problem
-
-```
-Button Press (Ideal):       Reality:
-_____|‾‾‾‾‾‾‾              _|‾|_|||‾‾‾‾
-                             ↑
-                    Multiple triggers from bounce!
-```
-
-### The Solution (in HAL_GPIO_EXTI_Callback)
-
-```c
-volatile uint32_t g_last_jump_time = 0;
-#define DEBOUNCE_MS 100
-
-void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
-    if (GPIO_Pin == BTN2_Pin) {
-        uint32_t current_time = HAL_GetTick();
-        
-        // Ignore presses within 100ms of previous press
-        if (current_time - g_last_jump_time > DEBOUNCE_MS) {
-            g_jump_button_pressed = 1;
-            g_last_jump_time = current_time;
-        }
-    }
-}
-```
-
-The 100ms timing window filters out mechanical bounce while still feeling responsive to the player.
+- **Input systems**: All modern games use interrupt-driven controllers
+- **Ability systems**: Dash, jump, dodge are time-limited states
 
 ---
 
@@ -425,11 +368,10 @@ The 100ms timing window filters out mechanical bounce while still feeling respon
 
 ### Using the Demo
 
-1. **Observe idle state** - Character stands still on ground
-2. **Move joystick left/right** - Character enters RUNNING state with animation
-3. **Press BTN2** - Character jumps (JUMPING state with physics)
-4. **Watch physics** - Gravity pulls character down, lands on ground
-5. **Read debug overlay** - LCD shows current state, Y position, velocity
+1. **Observe idle state** - Character stands still
+2. **Move joystick in cardinal directions (N/S/E/W)** - Character enters WALKING state with animation
+3. **Press button (BTN3)** - Character enters DASHING state (fast movement, speed sprite)
+4. **Watch state transitions** - Character automatically returns to previous state when dash ends or input stops
 
 ---
 
@@ -453,12 +395,11 @@ ST7789V2_Driver_STM32L4/ - LCD display driver
 | Function | Location | Purpose |
 |----------|----------|---------|
 | `Character_Init()` | Character.c | Initialize character struct |
-| `Character_Update()` | Character.c | FSM logic + physics (33 times/sec) |
+| `Character_Update()` | Character.c | FSM logic (movement, state transitions, animation) |
 | `Character_Draw()` | Character.c | Render sprite based on state |
-| `Character_DrawGround()` | Character.c | Draw platform/ground line |
-| `update_character()` | main.c | Call Character_Update (game logic) |
+| `update_character()` | main.c | Call Character_Update + clear button flag |
 | `render_game()` | main.c | Clear screen, draw all, show debug info |
-| `HAL_GPIO_EXTI_Callback()` | main.c | Jump button interrupt handler |
+| `HAL_GPIO_EXTI_Callback()` | main.c | Button interrupt handler (set dash flag) |
 
 ---
 
@@ -467,73 +408,23 @@ ST7789V2_Driver_STM32L4/ - LCD display driver
 After studying this demo, you should understand:
 
 1. ✅ **FSM for game characters** - Industry-standard technique for managing behavior
-2. ✅ **Physics simulation** - Gravity, velocity, collision detection in real-time
-3. ✅ **Update/render separation** - Clean architecture pattern used in all game engines
-4. ✅ **State-dependent behavior** - Same function produces different output based on state
-5. ✅ **Interrupt-driven input** - Hardware interrupts for responsive controls
-6. ✅ **Object-oriented C** - Encapsulation using structs and function naming conventions
-7. ✅ **Frame timing** - Fixed timestep game loop (30ms = ~33 FPS)
+2. ✅ **Update/render separation** - Clean architecture pattern used in all game engines
+3. ✅ **State-dependent behavior** - Same function produces different output based on state
+4. ✅ **Interrupt-driven input** - Hardware interrupts for responsive controls with debouncing
+5. ✅ **Button debouncing** - Software filtering of mechanical button noise
+6. ✅ **Time-based state transitions** - Dash state automatically expires after duration
+7. ✅ **Object-oriented C** - Encapsulation using structs and function naming conventions
 8. ✅ **Animation techniques** - Frame counters and sprite switching
-9. ✅ **Debouncing** - Software filtering of mechanical button noise
+9. ✅ **Fixed timestep game loop** - 30ms frames for consistent behavior
 
 ### Applicable to Professional Development
 
 These concepts transfer directly to:
-- **Unity C#**: GameObject Update() and Render() separation
-- **Unreal C++**: Character classes with state machines
-- **Mobile games**: Touch input handling, sprite rendering
-- **Web games**: requestAnimationFrame() game loops
-- **Console games**: Controller interrupt handling
-
----
-
-## Common FSM Applications
-
-FSMs are fundamental to embedded systems beyond games:
-
-### 1. Robot Control
-```c
-enum RobotState { SEARCHING, APPROACHING, GRIPPING, CARRYING, ERROR };
-// Sensors and inputs trigger state transitions
-```
-
-### 2. Communication Protocols
-```c
-enum UARTState { IDLE, RECEIVING_HEADER, RECEIVING_DATA, PROCESSING };
-// Byte received triggers transition based on protocol state
-```
-
-### 3. User Interfaces
-```c
-enum MenuState { MAIN_MENU, SETTINGS, CONFIRM_DIALOG, ABOUT };
-// Button presses navigate menu hierarchy
-```
-
-### 4. Safety Systems
-```c
-enum SafetyState { NORMAL, WARNING, ALARM, EMERGENCY_STOP };
-// Sensor thresholds trigger escalating safety responses
-```
-
----
-
-## Further Exploration
-
-### Documentation
-- [CHARACTER_FSM_GUIDE.md](CHARACTER_FSM_GUIDE.md) - Comprehensive tutorial
-- [CHARACTER_QUICK_REFERENCE.md](CHARACTER_QUICK_REFERENCE.md) - Quick lookup
-
-### Theory
-- **State Transition Diagrams** - Visual representation of FSM behavior
-- **Mealy vs Moore Machines** - Output timing in FSM theory
-- **Hierarchical FSMs** - Complex nested state machines
-- **Behavior trees** - Alternative to FSMs for AI (used in AAA games)
-
-### Advanced Topics
-- **Animation state machines** - Professional game engines (Unreal AnimGraph, Unity Animator)
-- **Physics engines** - Box2D, Bullet Physics integration with FSMs
-- **AI behavior** - Steering behaviors, pathfinding integrated with FSMs
-- **Networked games** - Client prediction, server reconciliation with FSMs
+- **Unity C#**: GameObject Update() and Render() separation, Animator state machines
+- **Unreal C++**: Character movement state machines, ability systems
+- **Mobile games**: Touch input handling, sprite rendering, state-based gameplay
+- **Console games**: Controller interrupt handling, dash/ability mechanics
+- **Web games**: requestAnimationFrame() game loops, canvas rendering
 
 ---
 

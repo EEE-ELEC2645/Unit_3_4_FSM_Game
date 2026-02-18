@@ -18,10 +18,10 @@ const uint8_t CharacterIDLE[8][8] = {
 };
 
 /**
- * @brief RUNNING animation frame 1 - Right leg back, left leg forward
+ * @brief WALKING animation frame 1
  * 8x8 pixel sprite
  */
-const uint8_t CharacterRUN1[8][8] = {
+const uint8_t CharacterWALK1[8][8] = {
     {255, 255, 0, 0, 0, 0, 255, 255},
     {255, 255, 0, 0, 0, 0, 255, 255},
     {255, 0, 0, 255, 255, 0, 0, 255},
@@ -33,10 +33,10 @@ const uint8_t CharacterRUN1[8][8] = {
 };
 
 /**
- * @brief RUNNING animation frame 2 - Left leg back, right leg forward (alternate)
+ * @brief WALKING animation frame 2
  * 8x8 pixel sprite
  */
-const uint8_t CharacterRUN2[8][8] = {
+const uint8_t CharacterWALK2[8][8] = {
     {255, 255, 0, 0, 0, 0, 255, 255},
     {255, 255, 0, 0, 0, 0, 255, 255},
     {255, 0, 0, 255, 255, 0, 0, 255},
@@ -48,25 +48,25 @@ const uint8_t CharacterRUN2[8][8] = {
 };
 
 /**
- * @brief JUMPING animation - User looking up, legs extended
- * 8x8 pixel sprite
+ * @brief DASHING animation - Speed lines around character
+ * 8x8 pixel sprite showing dashing/moving fast
  */
-const uint8_t CharacterJUMP[8][8] = {
-    {255, 255, 0, 0, 0, 0, 255, 255},
-    {255, 255, 0, 255, 255, 0, 255, 255},
+const uint8_t CharacterDASHING[8][8] = {
     {255, 0, 0, 255, 255, 0, 0, 255},
-    {255, 0, 0, 0, 0, 0, 0, 255},
-    {255, 0, 255, 255, 255, 255, 0, 255},
-    {255, 0, 255, 255, 255, 255, 0, 255},
-    {255, 255, 0, 0, 255, 0, 0, 255},
-    {255, 255, 0, 0, 255, 0, 0, 255}
+    {0, 255, 255, 255, 255, 255, 255, 0},
+    {0, 255, 0, 0, 0, 0, 255, 0},
+    {255, 255, 0, 255, 255, 0, 255, 255},
+    {255, 255, 0, 255, 255, 0, 255, 255},
+    {0, 255, 0, 0, 0, 0, 255, 0},
+    {0, 255, 255, 255, 255, 255, 255, 0},
+    {255, 0, 0, 255, 255, 0, 0, 255}
 };
 
 // ===== CHARACTER STATE NAMES (for debug display) =====
 const char* character_state_names[] = {
     "IDLE",
-    "RUNNING",
-    "JUMPING"
+    "WLK",
+    "DSH"
 };
 
 // ===== CHARACTER FUNCTION IMPLEMENTATIONS =====
@@ -77,133 +77,149 @@ const char* character_state_names[] = {
  */
 void Character_Init(Character_t* character) {
     character->x = 120;                 // Start in middle of screen
-    character->y = GROUND_Y;            // Start on ground
-    character->velocity_y = 0.0f;       // No vertical velocity initially
+    character->y = 120;                 // Start in middle of screen
     character->state = CHAR_IDLE;       // Start in IDLE state
     character->prev_state = CHAR_IDLE;
     character->animation_frame = 0;     // Animation starts at frame 0
     character->frame_counter = 0;
-    character->direction = 0;           // Not moving horizontally initially
+    character->move_x = 0;              // Not moving initially
+    character->move_y = 0;
+    character->dash_counter = 0;        // Not dashing initially
 }
 
 /**
  * @brief Update character state machine
  * 
  * This implements the character's INTERNAL FSM:
- * 1. Read input (joystick direction, jump button)
- * 2. Apply physics (gravity, velocity updates)
- * 3. Perform state transitions based on conditions
- * 4. Update animation frame
- * 5. Handle ground collision
+ * 1. Read joystick input
+ * 2. Update dash state if active
+ * 3. Update position based on movement and dash state
+ * 4. Update FSM state based on input
+ * 5. Update animation frame
  * 
- * KEY CONCEPT: This is a NESTED FSM - the character has its own state machine
- * that runs every frame, completely independent of the main game FSM.
+ * KEY CONCEPT: Button presses trigger dash state (temporary high-speed state)
  */
-void Character_Update(Character_t* character, Joystick_t* joy, uint8_t jump_button) {
+void Character_Update(Character_t* character, Joystick_t* joy, uint8_t dash_pressed) {
     
     // ------- STEP 1: Read input -------
-    // Determine horizontal movement direction from joystick
-    int8_t input_direction = 0;
-    if (joy->coord_mapped.x < -0.3f) {
-        input_direction = -1;           // Left
-    } else if (joy->coord_mapped.x > 0.3f) {
-        input_direction = 1;            // Right
+    // Determine movement direction from joystick direction (N/S/E/W etc.)
+    int8_t input_x = 0;
+    int8_t input_y = 0;
+    
+    switch (joy->direction) {
+        case CENTRE:
+            input_x = 0;
+            input_y = 0;
+            break;
+        case N:
+            input_x = 0;
+            input_y = -1;           // North (up)
+            break;
+        case NE:
+            input_x = 1;
+            input_y = -1;           // Northeast
+            break;
+        case E:
+            input_x = 1;
+            input_y = 0;            // East (right)
+            break;
+        case SE:
+            input_x = 1;
+            input_y = 1;            // Southeast
+            break;
+        case S:
+            input_x = 0;
+            input_y = 1;            // South (down)
+            break;
+        case SW:
+            input_x = -1;
+            input_y = 1;            // Southwest
+            break;
+        case W:
+            input_x = -1;
+            input_y = 0;            // West (left)
+            break;
+        case NW:
+            input_x = -1;
+            input_y = -1;           // Northwest
+            break;
     }
     
-    // ------- STEP 2: Horizontal movement -------
-    if (input_direction != 0) {
-        character->x += (input_direction * CHAR_SPEED);
-        character->direction = input_direction;
+    character->move_x = input_x;
+    character->move_y = input_y;
+    
+    // ------- STEP 2: Handle dash trigger -------
+    if (dash_pressed && character->dash_counter == 0) {
+        // Dash button pressed and not already dashing - start a new dash
+        character->dash_counter = CHAR_DASH_DURATION;
     }
     
-    // Keep character on screen horizontally
-    if (character->x < SCREEN_MIN_X) character->x = SCREEN_MIN_X;
-    if (character->x > SCREEN_MAX_X) character->x = SCREEN_MAX_X;
-    
-    // ------- STEP 3: Jump button handling -------
-    // Check if we should jump (only when on ground and button pressed)
-    // We do this BEFORE applying gravity so the jump velocity takes effect
-    int8_t is_on_ground = (character->y >= GROUND_Y) ? 1 : 0;
-    
-    if (jump_button && is_on_ground) {
-        // Start jump - set upward velocity
-        character->velocity_y = CHAR_JUMP_VELOCITY;
-        // Force character slightly above ground to ensure !is_on_ground next check
-        character->y = GROUND_Y - 1;
+    // ------- STEP 3: Determine movement speed -------
+    uint8_t current_speed = CHAR_SPEED;
+    if (character->dash_counter > 0) {
+        current_speed = CHAR_DASH_SPEED;
+        character->dash_counter--;
     }
     
-    // ------- STEP 4: Apply gravity and vertical motion -------
-    // Apply gravity if we're in the air
-    if (character->y < GROUND_Y) {
-        // In air - apply gravity
-        character->velocity_y += CHAR_GRAVITY;
-        
-        // Cap falling speed at terminal velocity
-        if (character->velocity_y > CHAR_MAX_FALL_VELOCITY) {
-            character->velocity_y = CHAR_MAX_FALL_VELOCITY;
-        }
-        
-        // Update vertical position
-        character->y += (int16_t)character->velocity_y;
-        
-        // Clamp to ground or above
-        if (character->y > GROUND_Y) {
-            character->y = GROUND_Y;
-        }
-    } else {
-        // On ground - reset vertical velocity
-        character->velocity_y = 0.0f;
-        character->y = GROUND_Y;
+    // ------- STEP 4: Calculate and update position -------
+    int16_t new_x = character->x + (input_x * current_speed);
+    int16_t new_y = character->y + (input_y * current_speed);
+    
+    // Keep on screen
+    if (new_x < SCREEN_MIN_X) new_x = SCREEN_MIN_X;
+    if (new_x > SCREEN_MAX_X) new_x = SCREEN_MAX_X;
+    if (new_y < SCREEN_MIN_Y) new_y = SCREEN_MIN_Y;
+    if (new_y > SCREEN_MAX_Y) new_y = SCREEN_MAX_Y;
+    
+    // Update position
+    if (input_x != 0 || input_y != 0) {
+        character->x = new_x;
+        character->y = new_y;
     }
     
-    // ------- STEP 5: Update internal FSM state -------
-    // (Previous state stored for detecting transitions)
+    // ------- STEP 5: Update FSM state -------
     character->prev_state = character->state;
     
-    // Recalculate ground state for FSM transitions
-    is_on_ground = (character->y >= GROUND_Y) ? 1 : 0;
+    uint8_t is_moving = (input_x != 0 || input_y != 0);
     
     // State machine transitions
     switch (character->state) {
         case CHAR_IDLE:
-            // IDLE -> RUNNING: when character starts moving
-            if (input_direction != 0) {
-                character->state = CHAR_RUNNING;
-            }
-            // IDLE -> JUMPING: when character leaves ground
-            if (!is_on_ground) {
-                character->state = CHAR_JUMPING;
+            if (is_moving) {
+                character->state = CHAR_WALKING;
+            } else if (character->dash_counter > 0) {
+                character->state = CHAR_DASHING;
             }
             break;
         
-        case CHAR_RUNNING:
-            // RUNNING -> IDLE: when joystick returns to center
-            if (input_direction == 0 && is_on_ground) {
+        case CHAR_WALKING:
+            if (!is_moving && character->dash_counter == 0) {
                 character->state = CHAR_IDLE;
-            }
-            // RUNNING -> JUMPING: when character leaves ground
-            if (!is_on_ground) {
-                character->state = CHAR_JUMPING;
+            } else if (character->dash_counter > 0) {
+                character->state = CHAR_DASHING;
             }
             break;
         
-        case CHAR_JUMPING:
-            // JUMPING -> IDLE/RUNNING: when character lands
-            if (is_on_ground) {
-                // Determine if we should go to IDLE or RUNNING based on current input
-                character->state = (input_direction != 0) ? CHAR_RUNNING : CHAR_IDLE;
+        case CHAR_DASHING:
+            if (character->dash_counter == 0) {
+                // Dash ended - return to previous state
+                if (is_moving) {
+                    character->state = CHAR_WALKING;
+                } else {
+                    character->state = CHAR_IDLE;
+                }
             }
             break;
     }
     
-    // ------- STEP 7: Update animation frame -------
+    // ------- STEP 6: Update animation frame -------
     character->frame_counter++;
     
-    // Every 8 frames, update animation frame for RUNNING state
-    if (character->frame_counter >= 8) {
+    // Every 10 frames, update animation frame for WALKING state
+    if (character->frame_counter >= 10) {
         character->frame_counter = 0;
-        // Cycle between 2 running frames
-        if (character->state == CHAR_RUNNING) {
+        // Cycle between 2 walking frames
+        if (character->state == CHAR_WALKING) {
             character->animation_frame = (character->animation_frame + 1) % 2;
         } else {
             character->animation_frame = 0;  // Reset frame for other states
@@ -216,65 +232,58 @@ void Character_Update(Character_t* character, Joystick_t* joy, uint8_t jump_butt
  * 
  * Different sprites are drawn based on character state:
  * - IDLE: Standing still sprite
- * - RUNNING: Alternating running animation
- * - JUMPING: Jumping sprite (arms up)
+ * - WALKING: Alternating walking animation
+ * - DASHING: Speed lines showing fast movement
  * 
  * The sprite is drawn with scaling for better visibility.
  */
 void Character_Draw(Character_t* character) {
     
-    // Choose which sprite to draw based on character state
-    const uint8_t* sprite = (const uint8_t*)CharacterIDLE;  // Default
+    int16_t x_pos = character->x - CHAR_WIDTH/2;
+    int16_t y_pos = character->y - CHAR_HEIGHT/2;
     
     switch (character->state) {
         case CHAR_IDLE:
-            sprite = (const uint8_t*)CharacterIDLE;
+            LCD_Draw_Sprite_Colour_Scaled(
+                x_pos, y_pos,
+                8, 8,
+                (uint8_t*)CharacterIDLE,
+                5,                              // Orange color
+                4                               // 4x scale
+            );
             break;
         
-        case CHAR_RUNNING:
-            // Alternate between 2 running sprites
-            sprite = (character->animation_frame == 0) 
-                ? (const uint8_t*)CharacterRUN1 
-                : (const uint8_t*)CharacterRUN2;
+        case CHAR_WALKING:
+            // Alternate between 2 walking sprites
+            if (character->animation_frame == 0) {
+                LCD_Draw_Sprite_Colour_Scaled(
+                    x_pos, y_pos,
+                    8, 8,
+                    (uint8_t*)CharacterWALK1,
+                    5,                          // Orange color
+                    4                           // 4x scale
+                );
+            } else {
+                LCD_Draw_Sprite_Colour_Scaled(
+                    x_pos, y_pos,
+                    8, 8,
+                    (uint8_t*)CharacterWALK2,
+                    5,                          // Orange color
+                    4                           // 4x scale
+                );
+            }
             break;
         
-        case CHAR_JUMPING:
-            sprite = (const uint8_t*)CharacterJUMP;
+        case CHAR_DASHING:
+            LCD_Draw_Sprite_Colour_Scaled(
+                x_pos, y_pos,
+                8, 8,
+                (uint8_t*)CharacterDASHING,
+                5,                              // Orange color
+                4                               // 4x scale
+            );
             break;
     }
-    
-    // Draw sprite at character position with scaling for visibility
-    // Color 5 = orange (good contrast on black background)
-    LCD_Draw_Sprite_Colour_Scaled(
-        character->x - CHAR_WIDTH/2,
-        character->y - CHAR_HEIGHT/2,
-        8,                              // Sprite is 8x8
-        8,
-        (uint8_t*)sprite,
-        5,                              // Orange color
-        4                               // 4x scale (upsize to 32x32)
-    );
-}
-
-/**
- * @brief Draw the ground and game environment
- * 
- * Creates a simple Mario-like scene:
- * - Horizontal line for the ground
- * - Some simple background elements
- */
-void Character_DrawGround(void) {
-    // Draw ground line
-    LCD_Draw_Line(
-        0, GROUND_Y + CHAR_HEIGHT/2,
-        240, GROUND_Y + CHAR_HEIGHT/2,
-        2  // Green color (from LCD color palette)
-    );
-    
-    // Draw simple platform/ground block pattern
-    // Draw a few simple rectangular blocks under the ground line for decoration
-    LCD_Draw_Rect(30, GROUND_Y + CHAR_HEIGHT/2 + 5, 30, 15, 3, 1);    // Blue rectangle
-    LCD_Draw_Rect(150, GROUND_Y + CHAR_HEIGHT/2 + 5, 30, 15, 3, 1);   // Blue rectangle
 }
 
 /**

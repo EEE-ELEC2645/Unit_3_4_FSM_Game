@@ -8,16 +8,15 @@
 
 /**
  * @file Character.h
- * @brief Character/Sprite FSM module for interactive LCD gaming
+ * @brief Character/Sprite FSM module
  * 
- * This demonstrates the concept of NESTED FINITE STATE MACHINES:
- * - An INTERNAL FSM for the character (IDLE, RUNNING, JUMPING)
- * - Each state has different animation frames and physics
- * - An EXTERNAL FSM for the game states (controlled by main.c)
+ * This demonstrates:
+ * - An INTERNAL FSM for the character (IDLE, WALKING, DASHING)
+ * - State transitions based on joystick input and button presses
+ * - Simple animation and movement system
  * 
  * KEY CONCEPT: The character is an "object with internal state"
- * Just like the overall game has states, so can individual game objects!
- * This is a powerful pattern for game development and embedded interactive systems.
+ * Button presses trigger dash state, which returns to idle/walking after duration.
  */
 
 // ===== CHARACTER STATE FSM =====
@@ -25,71 +24,69 @@
 /**
  * @brief Character internal state machine
  * 
- * IDLE:    Standing still, no horizontal movement
- * RUNNING: Moving horizontally (left or right)
- * JUMPING: In the air, falling due to gravity
+ * IDLE:    Standing still, no movement
+ * WALKING: Moving around in any direction
+ * DASHING: Fast movement in current direction (temporary state)
  * 
  * State transitions:
- * - IDLE -> RUNNING: when joystick X != 0
- * - RUNNING -> IDLE: when joystick X == 0
- * - ANY -> JUMPING: when jump button pressed AND character is on ground
- * - JUMPING -> IDLE/RUNNING: when character lands (y_position >= ground_y)
+ * - IDLE -> WALKING: when joystick moves
+ * - WALKING -> IDLE: when joystick returns to center
+ * - IDLE/WALKING -> DASHING: when button pressed
+ * - DASHING -> IDLE/WALKING: after dash duration ends
  */
 typedef enum {
     CHAR_IDLE = 0,      // Standing still
-    CHAR_RUNNING,       // Moving horizontally
-    CHAR_JUMPING        // In the air
+    CHAR_WALKING,       // Moving around
+    CHAR_DASHING       // Fast movement (temporary)
 } CharacterState_t;
 
 // Movement speed constants
-#define CHAR_SPEED 4                    // Horizontal movement speed (pixels per frame)
-#define CHAR_GRAVITY 1.1f               // Gravity acceleration (pixels per frame squared)
-#define CHAR_JUMP_VELOCITY -10.0f       // Initial jump velocity (negative = upward)
-#define CHAR_MAX_FALL_VELOCITY 15.0f    // Terminal velocity (max falling speed)
+#define CHAR_SPEED 2                    // Normal movement speed (pixels per frame)
+#define CHAR_DASH_SPEED 6               // Dash speed (pixels per frame)
+#define CHAR_DASH_DURATION 20           // Dash duration in frames
 
 // Character dimensions
 #define CHAR_WIDTH 32                   // Character sprite width (8 pixels * 4x scale)
 #define CHAR_HEIGHT 32                  // Character sprite height (8 pixels * 4x scale)
 
-// Ground position
-#define GROUND_Y 200                    // Y-coordinate of the ground
-
 // Screen boundaries
-#define SCREEN_MIN_X 20
-#define SCREEN_MAX_X 220
+#define SCREEN_MIN_X 10
+#define SCREEN_MAX_X 230
+#define SCREEN_MIN_Y 10
+#define SCREEN_MAX_Y 230
 
 // ===== CHARACTER STRUCTURE =====
 
 /**
  * @struct Character_t
- * @brief Represents a character/sprite with FSM state and animation
+ * @brief Represents a character/sprite with FSM state
  * 
  * This structure contains:
  * - Position (x, y)
- * - Velocity (for jump physics)
- * - Internal FSM state (IDLE, RUNNING, JUMPING)
+ * - Internal FSM state (IDLE, WALKING, DASHING)
  * - Animation frame counter
- * - Direction the character is facing
+ * - Movement direction
+ * - Dash counter for duration
  */
 typedef struct {
     // Position
-    int16_t x;                      // X position on screen
-    int16_t y;                      // Y position on screen
-    
-    // Physics
-    float velocity_y;               // Vertical velocity (for jumping/falling)
+    int16_t x;                      // X position on screen (center)
+    int16_t y;                      // Y position on screen (center)
     
     // Internal FSM state
     CharacterState_t state;         // Current character state
     CharacterState_t prev_state;    // Previous state (to detect transitions)
     
     // Animation
-    uint8_t animation_frame;        // Current animation frame (0-3)
+    uint8_t animation_frame;        // Current animation frame (0-1)
     uint8_t frame_counter;          // Counter for frame timing
     
-    // Direction
-    int8_t direction;               // -1 = left, 0 = idle, 1 = right
+    // Movement
+    int8_t move_x;                  // Current move direction X (-1, 0, or 1)
+    int8_t move_y;                  // Current move direction Y (-1, 0, or 1)
     
+    // Dash state
+    uint8_t dash_counter;           // Frames remaining in dash state
 } Character_t;
 
 // ===== CHARACTER FUNCTION PROTOTYPES =====
@@ -101,43 +98,23 @@ typedef struct {
 void Character_Init(Character_t* character);
 
 /**
- * @brief Update character state machine based on input
- * 
- * This is the main character FSM logic:
- * - Reads joystick input for movement
- * - Reads jump button input
- * - Updates internal state (IDLE -> RUNNING -> JUMPING, etc)
- * - Applies gravity during jumping
- * - Handles ground collision
- * 
+ * @brief Update character state machine
  * @param character: Pointer to character structure
- * @param joy: Joystick input data
- * @param jump_button: 1 if jump button pressed, 0 otherwise
+ * @param joy: Pointer to joystick state
+ * @param dash_pressed: 1 if dash button was pressed, 0 otherwise
  */
-void Character_Update(Character_t* character, Joystick_t* joy, uint8_t jump_button);
+void Character_Update(Character_t* character, Joystick_t* joy, uint8_t dash_pressed);
 
 /**
- * @brief Draw character on LCD at current position with current animation
- * 
- * Different sprites/patterns are drawn based on character state:
- * - IDLE: Simple standing figure (no animation)
- * - RUNNING: Alternating leg animation
- * - JUMPING: Arms up, legs in running position
- * 
+ * @brief Draw character on LCD
  * @param character: Pointer to character structure
  */
 void Character_Draw(Character_t* character);
 
 /**
- * @brief Draw the ground line and background
- * Simple visual reference for where the character can stand
- */
-void Character_DrawGround(void);
-
-/**
- * @brief Get character state as string (for debug display)
+ * @brief Get character state name as string
  * @param character: Pointer to character structure
- * @return String representation of current state
+ * @return State name string
  */
 const char* Character_GetStateName(Character_t* character);
 
