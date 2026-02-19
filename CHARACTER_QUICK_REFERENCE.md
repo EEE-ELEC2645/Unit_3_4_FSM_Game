@@ -5,7 +5,7 @@
 ┌─────────────────────────────────────┐
 │  Joystick (all directions)          │  → Move character (2 px/frame)
 ├─────────────────────────────────────┤
-│  Button Press (BTN3 / PC3)          │  → Trigger dash (6 px/frame, 20 frames)
+│  Button Press (BTN3 / PC3)          │  → Trigger dash (5 px/frame, 20 frames)
 └─────────────────────────────────────┘
 ```
 
@@ -64,7 +64,7 @@ typedef struct {
     int16_t x, y;                 // Position
     CharacterState_t state;       // IDLE, WALKING, or DASHING
     uint8_t animation_frame;      // Animation frame (0-1 for walking)
-    int8_t move_x, move_y;        // Direction (-1, 0, or 1)
+    uint8_t frame_counter;        // Animation timing counter
     uint8_t dash_counter;         // Frames remaining in dash (0-20)
 } Character_t;
 ```
@@ -78,7 +78,7 @@ if (dash_pressed && character->dash_counter == 0) {
 
 // Each frame:
 if (character->dash_counter > 0) {
-    current_speed = CHAR_DASH_SPEED;  // 6 px/frame (3x faster)
+    current_speed = CHAR_DASH_SPEED;  // 5 px/frame (~2.5x faster)
     character->dash_counter--;         // Decrement timer
 }
 
@@ -121,26 +121,17 @@ Unit_3_4_FSM_Game/
 
 ## Important Constants
 
-| Constant | Value | Purpose |
-|----------|-------|---------|
 | `CHAR_SPEED` | 2 | Normal movement speed (px/frame) |
-| `CHAR_DASH_SPEED` | 6 | Dash movement speed (px/frame) |
+| `CHAR_DASH_SPEED` | 5 | Dash movement speed (px/frame) |
 | `CHAR_DASH_DURATION` | 20 | Dash duration (frames) |
-| `CHAR_WIDTH` | 32 | Character sprite width (8px scaled 4x) |
-| `CHAR_HEIGHT` | 32 | Character sprite height (8px scaled 4x) |
-| `SCREEN_MIN_X` | 10 | Left boundary |
-| `SCREEN_MAX_X` | 230 | Right boundary |
-| `SCREEN_MIN_Y` | 10 | Top boundary |
-| `SCREEN_MAX_Y` | 230 | Bottom boundary |
 | `DEBOUNCE_DELAY` | 200 | Button debounce time (ms) |
 
 ## Key Functions
 
 ### Character Module Functions
-- `Character_Init(char*)` - Initialize character at spawn point
+- `Character_Init(char*)` - Initialize character at screen center
 - `Character_Update(char*, joystick, dash_pressed)` - Update FSM (call each frame)
 - `Character_Draw(char*)` - Draw character sprite on LCD
-- `Character_GetStateName(char*)` - Get state name string for debug
 
 ### Main Loop Integration (Update/Render Pattern)
 ```c
@@ -171,24 +162,22 @@ render_game();
 ## State Update Flow
 
 ### Each Frame (in Character_Update):
-1. **Read joystick input** (X and Y axes)
-2. **Check dash trigger** - if button pressed and not already dashing:
+1. **Get movement direction** - Read joystick->direction (N/S/E/W...)
+2. **Check dash trigger** - If button pressed and not already dashing:
    - Set `dash_counter = 20` (frames)
 3. **Choose movement speed**:
-   - If dashing: `speed = 6` px/frame
+   - If dashing: `speed = 5` px/frame
    - Else: `speed = 2` px/frame
    - Decrement dash_counter if active
-4. **Calculate new position**:
-   - `new_x = x + (input_x * speed)`
-   - `new_y = y + (input_y * speed)`
-5. **Clamp to screen boundaries** (keep character on screen)
-6. **Update position** if input detected
-7. **Update FSM state**:
-   - IDLE → WALKING (if input)
+4. **Calculate and update position**:
+   - Apply movement in all 8 directions
+   - Clamp to screen (20 to 220 pixels)
+5. **Update FSM state**:
+   - IDLE → WALKING (if moving)
    - Any state → DASHING (if dash_counter > 0)
    - DASHING → IDLE/WALKING (when dash_counter reaches 0)
-8. **Update animation**:
-   - Advance frame counter for walk animation
+6. **Update animation**:
+   - Advance frame counter for walk animation (cycles every 10 frames)
 
 ## Customization Tips
 
@@ -196,7 +185,7 @@ render_game();
 Modify constants in Character.h:
 ```c
 #define CHAR_SPEED 2        // Normal speed (change to 1, 3, 4, etc.)
-#define CHAR_DASH_SPEED 6   // Dash speed (change to 4, 8, 10, etc.)
+#define CHAR_DASH_SPEED 5   // Dash speed (change to 3, 6, 8, etc.)
 ```
 
 ### Change Dash Duration
@@ -236,7 +225,7 @@ if (game_character.dash_counter > 0) {
 | Dash is too fast | Decrease `CHAR_DASH_SPEED` (try 4 or 5) |
 | Dash lasts too long | Decrease `CHAR_DASH_DURATION` (try 10 or 15) |
 | Animation looks choppy | Adjust frame counter threshold in Character_Update (try 5 or 15) |
-| Character walks off screen | Check screen boundary constants (SCREEN_MIN/MAX_X/Y) |
+| Character walks off screen | Check screen boundary values in Character_Update (currently 20 to 220 pixels) |
 
 ## Debugging Quick Keys
 
@@ -256,7 +245,7 @@ LCD_printString(dash_button_pressed ? "BTN ON" : "BTN OFF", 150, 220, 1, 2);
 
 1. **Try moving the character** - should see IDLE → WALKING transition
 2. **Press the button** - should see instant transition to DASHING
-3. **Watch the dash** - character moves 3x faster for exactly 20 frames
+3. **Watch the dash** - character moves 2.5x faster for exactly 20 frames
 4. **Dash ends** - character returns to IDLE if not moving, WALKING if still holding joystick
 5. **Experiment** - change speeds, dash duration, button responsiveness
 

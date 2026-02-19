@@ -20,14 +20,14 @@ This demo implements a **simple game character with dash ability** controlled by
 |-------|----------|--------|-----------------|---------------|
 | **IDLE** | Standing still | Static sprite | 0 | WALKING (joystick move)<br>DASHING (button press) |
 | **WALKING** | Moving in direction | Animated walk cycle | 2 px/frame | IDLE (joystick center)<br>DASHING (button press) |
-| **DASHING** | Fast movement | Speed lines sprite | 6 px/frame | IDLE (dash ends, no input)<br>WALKING (dash ends, input held) |
+| **DASHING** | Fast movement | Speed lines sprite | 5 px/frame | IDLE (dash ends, no input)<br>WALKING (dash ends, input held) |
 
 ### Dash System
 
 **Button-triggered temporary speed boost:**
 - Press button (BTN3) to start dashing
 - Dash duration: 20 frames (~600ms at 30 FPS)
-- Dash speed: 6 pixels/frame (3x normal speed)
+- Dash speed: 5 pixels/frame (~2.5x normal speed)
 - Can dash from IDLE or WALKING state
 - Automatically returns to previous state when dash ends
 
@@ -287,104 +287,3 @@ Character module demonstrates simple encapsulation in C:
 3. **Combo system**: Reward consecutive dashes without stopping
 4. **Tutorial overlay**: Display state transitions on screen
 5. **Game state FSM**: Add MENU, PLAYING, PAUSED, GAME_OVER states
-
----
-
-## Educational Value
-
-This demo teaches fundamental game development concepts:
-
-1. **FSM Design Pattern** - Core technique used in every game engine
-2. **Interrupt-Driven Input** - Responsive player control architecture
-3. **Update/Render Loop** - Industry-standard game architecture
-4. **State-Dependent Behavior** - Same input produces different output based on state
-5. **Time-Based State Transitions** - DASHING state automatically expires
-6. **Object-Oriented C** - Encapsulation and modularity without C++
-7. **Real-Time Systems** - Frame timing, fixed timestep iteration
-
-### Connections to Professional Game Development
-
-- **Unity/Unreal Engine**: Use same update/render separation
-- **Character controllers**: Commercial games use FSM for player movement
-- **State machines**: Every NPC enemy behavior is an FSM
-- **Input systems**: All modern games use interrupt-driven controllers
-- **Ability systems**: Dash, jump, dodge are time-limited states
-
----
-
-## Running the Code
-
-### Build and Flash
-
-1. Open this folder in VS Code with STM32 extension
-2. Select **Debug** configuration in `.vscode/tasks.json`
-3. Click **Build** (or press Ctrl+Shift+B)
-4. Connect Nucleo-L476RG board via USB
-5. Flash and run (press F5 for debugging)
-
-### Using the Demo
-
-1. **Observe idle state** - Character stands still
-2. **Move joystick in cardinal directions (N/S/E/W)** - Character enters WALKING state with animation
-3. **Press button (BTN3)** - Character enters DASHING state (fast movement, speed sprite)
-4. **Watch state transitions** - Character automatically returns to previous state when dash ends or input stops
-
----
-
-## Code Structure
-
-### File Organization
-
-```
-Character/
-  ├── Character.h         - FSM states, constants, function prototypes
-  └── Character.c         - FSM implementation, sprites, physics
-  
-Core/Src/main.c          - Main game loop (update/render separation)
-
-Joystick/                - Analog input driver
-ST7789V2_Driver_STM32L4/ - LCD display driver
-```
-
-### Key Functions
-
-| Function | Location | Purpose |
-|----------|----------|---------|
-| `Character_Init()` | Character.c | Initialize character struct |
-| `Character_Update()` | Character.c | FSM logic (movement, state transitions, animation) |
-| `Character_Draw()` | Character.c | Render sprite based on state |
-| `update_character()` | main.c | Call Character_Update + clear button flag |
-| `render_game()` | main.c | Clear screen, draw all, show debug info |
-| `HAL_GPIO_EXTI_Callback()` | main.c | Button interrupt handler (set dash flag) |
-
----
-
-## Learning Outcomes
-
-After studying this demo, you should understand:
-
-1. ✅ **FSM for game characters** - Industry-standard technique for managing behavior
-2. ✅ **Update/render separation** - Clean architecture pattern used in all game engines
-3. ✅ **State-dependent behavior** - Same function produces different output based on state
-4. ✅ **Interrupt-driven input** - Hardware interrupts for responsive controls with debouncing
-5. ✅ **Button debouncing** - Software filtering of mechanical button noise
-6. ✅ **Time-based state transitions** - Dash state automatically expires after duration
-7. ✅ **Object-oriented C** - Encapsulation using structs and function naming conventions
-8. ✅ **Animation techniques** - Frame counters and sprite switching
-9. ✅ **Fixed timestep game loop** - 30ms frames for consistent behavior
-
-### Applicable to Professional Development
-
-These concepts transfer directly to:
-- **Unity C#**: GameObject Update() and Render() separation, Animator state machines
-- **Unreal C++**: Character movement state machines, ability systems
-- **Mobile games**: Touch input handling, sprite rendering, state-based gameplay
-- **Console games**: Controller interrupt handling, dash/ability mechanics
-- **Web games**: requestAnimationFrame() game loops, canvas rendering
-
----
-
-## License
-
-This project is part of the ELEC2645 Embedded Systems module at the University of Leeds.
-````
