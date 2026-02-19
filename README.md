@@ -71,24 +71,20 @@ while (1) {
 ### Character Module Structure
 
 ```c
-// Character.h - Interface
+// Character.h - Simple sprite with state
 typedef enum {
-    CHAR_IDLE,        // Standing still
-    CHAR_WALKING,     // Moving normally
-    CHAR_DASHING      // Fast movement (temporary)
+    CHAR_IDLE,        // Not moving
+    CHAR_WALKING,     // Moving in direction
+    CHAR_DASHING      // Fast movement (button triggered)
 } CharacterState_t;
 
-// Movement constants
-#define CHAR_SPEED 2                // Normal speed (pixels/frame)
-#define CHAR_DASH_SPEED 6           // Dash speed (pixels/frame)
-#define CHAR_DASH_DURATION 20       // Dash duration (frames)
-
+// Minimal data structure - just position and state
 typedef struct {
-    int16_t x, y;                 // Position
-    CharacterState_t state;       // Current FSM state
-    uint8_t animation_frame;      // Animation counter
-    int8_t move_x, move_y;        // Movement direction (-1, 0, or 1)
-    uint8_t dash_counter;         // Frames remaining in dash
+    int16_t x, y;                   // Position
+    CharacterState_t state;         // Current state
+    uint8_t animation_frame;        // 0 or 1 (walk cycle)
+    uint8_t frame_counter;          // Animation timing
+    uint8_t dash_counter;           // Frames left in dash
 } Character_t;
 
 void Character_Init(Character_t* character);
@@ -96,22 +92,17 @@ void Character_Update(Character_t* character, Joystick_t* joy, uint8_t dash_pres
 void Character_Draw(Character_t* character);
 ```
 
+Just 5 essential fields - position, state, and animation/dash counters. Nothing more.
+
 ## How the Character FSM Works
 
 ### 1. State Storage
 
-The character's current state is stored in the `Character_t` structure:
+The character's current state is stored in a simple struct:
 
 ```c
-Character_t game_character = {
-    .x = 120,
-    .y = 120,
-    .state = CHAR_IDLE,
-    .animation_frame = 0,
-    .move_x = 0,
-    .move_y = 0,
-    .dash_counter = 0
-};
+Character_t game_character;  // Created in main, contains position and state
+Character_Init(&game_character);  // Initialize at screen center
 ```
 
 ### 2. Interrupt-Driven Input
@@ -140,132 +131,97 @@ Remember to keep the ISR short and simple!
 
 ### 3. State Machine Logic (Character_Update)
 
-Every frame, the FSM processes input and manages state transitions:
+Each frame, update character movement and state:
 
 ```c
-void Character_Update(Character_t* character, Joystick_t* joy, 
-                     uint8_t dash_pressed) {
-    // 1. Read joystick input (using discrete 8-way directions)
-    int8_t input_x = 0, input_y = 0;
+void Character_Update(Character_t* character, Joystick_t* joy, uint8_t dash_pressed) {
+    
+    // STEP 1: Get movement direction from joystick (N/S/E/W...)
+    int16_t move_x = 0, move_y = 0;
     
     switch (joy->direction) {
-        case CENTRE: input_x = 0; input_y = 0; break;
-        case N:  input_x = 0; input_y = -1; break;  // North (up)
-... // Other directions (NE, E, SE, S, SW, W, NW) set input_x and input_y accordingly
+        case N:  move_y = -1; break;
+// and so on for NE, E, SE, S, SW, W, NW
     }
     
-    character->move_x = input_x;
-    character->move_y = input_y;
-    
-    // 2. Handle dash trigger from button press
+    // STEP 2: Dash button pressed?
     if (dash_pressed && character->dash_counter == 0) {
-        character->dash_counter = CHAR_DASH_DURATION;  // Start 20-frame dash
+        character->dash_counter = CHAR_DASH_DURATION;
     }
     
-    // 3. Choose movement speed based on dash state
-    uint8_t current_speed = CHAR_SPEED;
+    // STEP 3: Apply speed (normal or dash speed)
+    uint8_t speed = CHAR_SPEED;
     if (character->dash_counter > 0) {
-        current_speed = CHAR_DASH_SPEED;  // Move 3x faster during dash
-        character->dash_counter--;        // Count down dash duration
+        speed = CHAR_DASH_SPEED;
+        character->dash_counter--;
     }
     
-    // 4. Update position
-    int16_t new_x = character->x + (input_x * current_speed);
-    int16_t new_y = character->y + (input_y * current_speed);
+    // STEP 4: Move sprite
+    int16_t new_x = character->x + (move_x * speed);
+    int16_t new_y = character->y + (move_y * speed);
+    if (new_x >= 20 && new_x <= 220) character->x = new_x;
+    if (new_y >= 20 && new_y <= 220) character->y = new_y;
     
-    // Keep on screen
-    if (new_x < SCREEN_MIN_X) new_x = SCREEN_MIN_X;
-    if (new_x > SCREEN_MAX_X) new_x = SCREEN_MAX_X;
-    if (new_y < SCREEN_MIN_Y) new_y = SCREEN_MIN_Y;
-    if (new_y > SCREEN_MAX_Y) new_y = SCREEN_MAX_Y;
-    
-    if (input_x != 0 || input_y != 0) {
-        character->x = new_x;
-        character->y = new_y;
+    // STEP 5: Update state
+    uint8_t is_moving = (move_x != 0 || move_y != 0);
+    if (character->dash_counter > 0) {
+        character->state = CHAR_DASHING;
+    } else if (is_moving) {
+        character->state = CHAR_WALKING;
+    } else {
+        character->state = CHAR_IDLE;
     }
     
-    // 5. Update FSM state based on input and dash status
-    character->prev_state = character->state;
-    uint8_t is_moving = (input_x != 0 || input_y != 0);
-    
-    switch (character->state) {
-        case CHAR_IDLE:
-            if (is_moving) {
-                character->state = CHAR_WALKING;
-            } else if (character->dash_counter > 0) {
-                character->state = CHAR_DASHING;
-            }
-            break;
-        
-        case CHAR_WALKING:
-            if (!is_moving && character->dash_counter == 0) {
-                character->state = CHAR_IDLE;
-            } else if (character->dash_counter > 0) {
-                character->state = CHAR_DASHING;
-            }
-            break;
-        
-        case CHAR_DASHING:
-            if (character->dash_counter == 0) {
-                // Dash ended - return to previous state
-                if (is_moving) {
-                    character->state = CHAR_WALKING;
-                } else {
-                    character->state = CHAR_IDLE;
-                }
-            }
-            break;
-    }
-    
-    // 6. Update animation frame
-    character->frame_counter++;
-    if (character->frame_counter >= 10) {
-        character->frame_counter = 0;
-        if (character->state == CHAR_WALKING) {
+    // STEP 6: Update animation
+    if (character->state == CHAR_WALKING) {
+        character->frame_counter++;
+        if (character->frame_counter >= 10) {
+            character->frame_counter = 0;
             character->animation_frame = (character->animation_frame + 1) % 2;
-        } else {
-            character->animation_frame = 0;
         }
+    } else {
+        character->animation_frame = 0;
+        character->frame_counter = 0;
     }
 }
 ```
 
-**State transition flow:**
-1. Button pressed → `dash_button_pressed` set to 1 by interrupt
-2. Main loop reads flag, clears it
-3. `Character_Update()` starts dash countdown
-4. While `dash_counter > 0`, move at fast speed and stay in DASHING state
-5. When `dash_counter` reaches 0, transition back to IDLE or WALKING
+**Simple and straightforward**: Just read input, handle the dash, move the sprite, update state, and animate.
 
 ### 4. State-Dependent Rendering (Character_Draw)
 
-The sprite changes based on the current state:
+Draw different sprites based on current state:
 
 ```c
 void Character_Draw(Character_t* character) {
-    const uint8_t* sprite;
+    int16_t x_pos = character->x - 16;  // Center the sprite
+    int16_t y_pos = character->y - 16;
     
     switch (character->state) {
         case CHAR_IDLE:
-            sprite = CharacterIDLE;
+            LCD_Draw_Sprite_Colour_Scaled(x_pos, y_pos, 8, 8, 
+                                         (uint8_t*)CharacterIDLE, 5, 4);
             break;
         
         case CHAR_WALKING:
-            // Animated sprite (alternates between 2 frames)
-            sprite = (character->animation_frame == 0) ? 
-                     CharacterWALK1 : CharacterWALK2;
+            if (character->animation_frame == 0) {
+                LCD_Draw_Sprite_Colour_Scaled(x_pos, y_pos, 8, 8,
+                                             (uint8_t*)CharacterWALK1, 5, 4);
+            } else {
+                LCD_Draw_Sprite_Colour_Scaled(x_pos, y_pos, 8, 8,
+                                             (uint8_t*)CharacterWALK2, 5, 4);
+            }
             break;
         
         case CHAR_DASHING:
-            sprite = CharacterDASHING;  // Speed lines
+            LCD_Draw_Sprite_Colour_Scaled(x_pos, y_pos, 8, 8,
+                                         (uint8_t*)CharacterDASHING, 5, 4);
             break;
     }
-    
-    LCD_Draw_Sprite_Colour_Scaled(character->x, character->y, sprite, 5, 4);
 }
 ```
 
-**This is the FSM pattern in action**: The SAME drawing function produces DIFFERENT output based on the current state!
+Each state has its own direct LCD call - clean and easy to follow.
 
 ---
 
@@ -298,11 +254,11 @@ Industry-standard game loop pattern:
 
 ### 4. Object-Oriented C
 
-Character module demonstrates encapsulation in C:
-- **Character_t struct**: Data encapsulation (position, state, movement)
-- **Character_* functions**: Method-like interface (Init, Update, Draw)
-- **Information hiding**: Sprite arrays in .c file, not exposed in header
-- **Modularity**: Character logic independent from main game loop
+Character module demonstrates simple encapsulation in C:
+- **Character_t struct**: Data storage (position, state, animation)
+- **Character_* functions**: Interface (Init, Update, Draw)
+- **Info hiding**: Sprite arrays in .c file only
+- **Simple and direct**: No complex patterns, just straightforward C
 
 ---
 
@@ -312,8 +268,8 @@ Character module demonstrates encapsulation in C:
 
 1. **Adjust speeds**: Change `CHAR_SPEED` and `CHAR_DASH_SPEED` in Character.h
 2. **Longer dash**: Increase `CHAR_DASH_DURATION` (in frames)
-3. **Screen boundaries**: Adjust `SCREEN_MIN/MAX_X/Y` constants in Character.h
-4. **Animation speed**: Change frame counter threshold in `Character_Update()`
+3. **Screen boundaries**: Adjust the coordinate checks (20 to 220) in `Character_Update()`
+4. **Animation speed**: Change frame counter threshold (currently 10) in `Character_Update()`
 5. **New sprite graphics**: Replace `CharacterIDLE`, `CharacterWALK1`, `CharacterWALK2`, `CharacterDASHING` arrays
 
 ### Intermediate Additions

@@ -127,6 +127,18 @@ volatile uint32_t dash_button_last_interrupt_time = 0;
 void update_character(Joystick_t* joy);
 void render_game(void);
 
+/**
+ * @brief Get character state name
+ */
+const char* get_char_state_name(CharacterState_t state) {
+    switch (state) {
+        case CHAR_IDLE:    return "IDLE";
+        case CHAR_WALKING: return "WALK";
+        case CHAR_DASHING: return "DASH";
+        default:           return "???";
+    }
+}
+
 // ===== Main Function =====
 
 /**
@@ -250,7 +262,7 @@ void render_game(void) {
     
     // Draw debug info
     LCD_printString("St:", 10, 5, 1, 2);
-    LCD_printString((char*)Character_GetStateName(&game_character), 60, 5, 1, 2);
+    LCD_printString((char*)get_char_state_name(game_character.state), 60, 5, 1, 2);
     
     char pos_str[24];
     sprintf(pos_str, "X:%d Y:%d", game_character.x, game_character.y);
